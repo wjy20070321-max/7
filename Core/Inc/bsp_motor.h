@@ -3,22 +3,21 @@
 
 #include "main.h"
 
-/* TIM1 PWM ÖØ×°ÔØÖµ ARR ÉèÎª 8399£¬¶ÔÓ¦µÄ×î´óÕ¼¿Õ±È¼ÆÊıÖµ */
-#define MOTOR_MAX_PWM   8399
+/* TIM1 å½“å‰ ARR = 999ï¼Œæ‰€ä»¥ PWM æœ€å¤§æ¯”è¾ƒå€¼å¿…é¡»åŒæ­¥ä¸º 999 */
+#define MOTOR_MAX_PWM 999
 
-/* ×óÂÖÒı½Å¶¨Òå (Motor 1) */
-#define MOTOR_L_IN1_PORT  GPIOG
-#define MOTOR_L_IN1_PIN   GPIO_PIN_7
-#define MOTOR_L_IN2_PORT  GPIOG
-#define MOTOR_L_IN2_PIN   GPIO_PIN_8
+/* å·¦è½®å¼•è„šå®šä¹‰ (Motor 1) */
+#define MOTOR_L_IN1_PORT GPIOG
+#define MOTOR_L_IN1_PIN  GPIO_PIN_7
+#define MOTOR_L_IN2_PORT GPIOG
+#define MOTOR_L_IN2_PIN  GPIO_PIN_8
 
-/* ÓÒÂÖÒı½Å¶¨Òå (Motor 2) */
-#define MOTOR_R_IN1_PORT  GPIOG
-#define MOTOR_R_IN1_PIN   GPIO_PIN_5
-#define MOTOR_R_IN2_PORT  GPIOG
-#define MOTOR_R_IN2_PIN   GPIO_PIN_6
+/* å³è½®å¼•è„šå®šä¹‰ (Motor 2) */
+#define MOTOR_R_IN1_PORT GPIOG
+#define MOTOR_R_IN1_PIN  GPIO_PIN_5
+#define MOTOR_R_IN2_PORT GPIOG
+#define MOTOR_R_IN2_PIN  GPIO_PIN_6
 
-/* º¯ÊıÉùÃ÷ */
 void Motor_Init(void);
 void Motor_Set_Speed(int16_t left_speed, int16_t right_speed);
 void Motor_Stop(void);

@@ -1,258 +1,375 @@
 #include "app_control.h"
-#include "bsp_motor.h"    
+
+#include "bsp_motor.h"
 #include "bsp_encoder.h"
-#include "bsp_sensor.h" 
+#include "bsp_sensor.h"
 #include "bsp_sa100.h"
 #include "tim.h"
 
-/* ------------------- ÐÂÔöµÄ Debug ²âÊÔ±äÁ¿ ------------------- */
-uint8_t Debug_Mode_Enable = 0; // ÉèÎª 1 ½øÈë²âÊÔÄ£Ê½£¬È«²¿Ó²¼þÕý³£ºó¸ÄÎª 0
-float test_pwm_L = 0;          
-float test_pwm_R = 0;          
-int16_t test_enc_L = 0;        
-int16_t test_enc_R = 0;        
-float test_angle = 0;          
-float test_track_err = 0;      
-uint8_t test_is_B_point = 0;   
+/* =========================================================
+ * æŽ§åˆ¶å‘¨æœŸå’Œç¡¬ä»¶å‚æ•°
+ * ========================================================= */
+#define CTRL_PERIOD_MS              5U
+#define CTRL_PERIOD_MS_F            5.0f
+#define ENCODER_PPR                 1560.0f
+#define ANGLE_SAFE_MIN              105.0f
+#define ANGLE_SAFE_MAX              185.0f
 
-// ?¡¾ÐÂÔö²âÊÔ±äÁ¿¡¿×¨ÃÅÓÃÀ´¹Û²â´®¿ÚÆÁÍ¨Ñ¶
-uint8_t test_screen_task = 0;   
+/* A/B é»‘åœ†ç‚¹æ˜¯ç›´å¾„ 4cmï¼Œé»‘çº¿å®½ 1.8cmã€‚å…ˆèµ°å‡º A ç‚¹åŽå†å…è®¸è¯†åˆ« B ç‚¹ã€‚ */
+#define B_POINT_ACTIVE_COUNT_MIN    5U
+#define B_POINT_CENTER_COUNT_MIN    3U
+#define B_POINT_DEBOUNCE_COUNT      3U
+#define B_POINT_MIN_TRAVEL_PULSE    1200.0f
+#define B_POINT_MIN_TIME_MS         800U
 
-/* ----------------- ÐÂÔöµÄ VOFA+ ×ªËÙ¹Û²â±äÁ¿ ----------------- */
-float Actual_Speed_L = 0.0f;   // ×óÂÖÊµ¼Ê×ªËÙ (RPM)
-float Actual_Speed_R = 0.0f;   // ÓÒÂÖÊµ¼Ê×ªËÙ (RPM)
-float Target_Speed_L = 0.0f;   // ×óÂÖÄ¿±ê×ªËÙ (RPM)
-float Target_Speed_R = 0.0f;   // ÓÒÂÖÄ¿±ê×ªËÙ (RPM)
+/* =========================================================
+ * Debug æµ‹è¯•å˜é‡
+ * ========================================================= */
+uint8_t Debug_Mode_Enable = 0;
+float test_pwm_L = 0.0f;
+float test_pwm_R = 0.0f;
+int16_t test_enc_L = 0;
+int16_t test_enc_R = 0;
+float test_angle = 0.0f;
+float test_track_err = 0.0f;
+uint8_t test_is_B_point = 0;
+uint8_t test_screen_task = 0;
 
-/* ========================================================= */
-/* ¡¾ºËÐÄ¡¿PID ¿ØÖÆÆ÷²ÎÊýÈ«¾Ö±äÁ¿                             */
-/* ========================================================= */
-// 1. Ö±Á¢»·²ÎÊý (PD ¿ØÖÆ)
-float Balance_Kp = 50.0f;            // ±ÈÀýÏµÊý
-float Balance_Kd = 1.5f;             // Î¢·ÖÏµÊý
-float Mechanical_Middle = 145.0f;    // »úÐµÖÐÖµ£ºÐ¡³µ¸ÕºÃÆ½ºâÊ±µÄÕæÊµÎïÀí½Ç¶È
+/* VOFA+ è½¬é€Ÿè§‚æµ‹å˜é‡ */
+float Actual_Speed_L = 0.0f;
+float Actual_Speed_R = 0.0f;
+float Target_Speed_L = 0.0f;
+float Target_Speed_R = 0.0f;
 
-// 2. ËÙ¶È»·²ÎÊý (PI ¿ØÖÆ) - µ¹Á¢°Ú´®¼¶×¨ÓÃ
-// ??¡¾ºËÐÄÐÞ¸´¡¿ËÙ¶È»·±ØÐëÎª¸ºÊý·´À¡£¬·ñÔò»áµ¼ÖÂÇ°³åËÀÑ­»·£¡
-float Velocity_Kp = -0.2f;           
+/* =========================================================
+ * PID å‚æ•°ï¼šå…ˆç”¨ä¿å®ˆå€¼ï¼Œæœ€ç»ˆå¿…é¡»å®žè½¦è°ƒå‚
+ * ========================================================= */
+float Balance_Kp = 50.0f;
+float Balance_Kd = 1.5f;
+float Mechanical_Middle = 145.0f;
+
+/* é€Ÿåº¦çŽ¯ç”¨äºŽä¿®æ­£ç›®æ ‡è§’åº¦ã€‚è‹¥è½¦è¶ŠæŽ§è¶Šå†²ï¼Œå…ˆæ•´ä½“åå· Velocity_Kp/Kiã€‚ */
+float Velocity_Kp = -0.2f;
 float Velocity_Ki = -0.01f;
 
-// 3. Ñ­¼£»·²ÎÊý (PD ¿ØÖÆ)
+/* åŽŸåœ°å¹³è¡¡ä½ç½®çŽ¯ï¼šç”¨äºŽåŽ‹ä½ A ç‚¹é™„è¿‘æ¼‚ç§»ã€‚è‹¥ç¦» A è¶Šæ¥è¶Šè¿œï¼Œæ•´ä½“åå·ã€‚ */
+float Position_Kp = -0.0020f;
+float Position_Kd = -0.0005f;
+
 float Track_Kp = 30.0f;
 float Track_Kd = 10.0f;
-float Track_Base_Speed = 350.0f;     
+float Track_Base_Speed = 350.0f;
 float last_track_error = 0.0f;
-/* ========================================================= */
 
-/* È«¾Ö¿ØÖÆ±äÁ¿ */
+/* =========================================================
+ * å…¨å±€æŽ§åˆ¶å˜é‡
+ * ========================================================= */
 volatile Target_Task_e Current_Task = TASK_IDLE;
 volatile uint32_t Task_Timer_Ms = 0;
 
-float Balance_PWM = 0, Velocity_PWM = 0, Track_PWM = 0; 
-float Left_Motor_Out = 0, Right_Motor_Out = 0;
+float Balance_PWM = 0.0f;
+float Velocity_PWM = 0.0f;
+float Track_PWM = 0.0f;
+float Left_Motor_Out = 0.0f;
+float Right_Motor_Out = 0.0f;
 
-/* --- µ×²ãÖ§³Åº¯Êý --- */
-void Motor_Output_Limit(float *left, float *right) {
-    if(*left > 999.0f) *left = 999.0f;
-    if(*left < -999.0f) *left = -999.0f;
-    if(*right > 999.0f) *right = 999.0f;
-    if(*right < -999.0f) *right = -999.0f;
-}
+/* å†…éƒ¨çŠ¶æ€å˜é‡ */
+static float velocity_integral = 0.0f;
+static float balance_last_angle = 145.0f;
+static float position_sum_pulse = 0.0f;
+static float last_position_error = 0.0f;
+static float travel_pulse_abs = 0.0f;
+static uint8_t b_point_debounce = 0U;
 
-uint8_t Is_Reach_B_Point(void) {
-    uint8_t black_sum = 0;
-    if(HAL_GPIO_ReadPin(TRACK3_PORT, TRACK3_PIN) == GPIO_PIN_RESET) black_sum++;
-    if(HAL_GPIO_ReadPin(TRACK4_PORT, TRACK4_PIN) == GPIO_PIN_RESET) black_sum++;
-    if(HAL_GPIO_ReadPin(TRACK5_PORT, TRACK5_PIN) == GPIO_PIN_RESET) black_sum++;
-    if(HAL_GPIO_ReadPin(TRACK6_PORT, TRACK6_PIN) == GPIO_PIN_RESET) black_sum++;
-    
-    if (black_sum >= 3) {
-        return 1; 
+static float Limit_Float(float value, float min_value, float max_value)
+{
+    if (value > max_value) {
+        return max_value;
     }
-    return 0; 
+    if (value < min_value) {
+        return min_value;
+    }
+    return value;
 }
 
-/* ========================================================= */
-/* ¡¾ºËÐÄËã·¨¡¿Èý´ó¿ØÖÆ»·¼ÆËãº¯Êý                            */
-/* ========================================================= */
+static uint8_t Is_Angle_Safe(void)
+{
+    return (Pendulum_Angle > ANGLE_SAFE_MIN && Pendulum_Angle < ANGLE_SAFE_MAX) ? 1U : 0U;
+}
 
-// 1. Ñ­¼£ PD ¼ÆËãº¯Êý
-float Calculate_Track_PWM(void) {
-    float current_error = Sensor_Get_Track_Error(); 
+static void Clear_Dynamic_Loops(void)
+{
+    velocity_integral = 0.0f;
+    balance_last_angle = Pendulum_Angle;
+    last_track_error = 0.0f;
+    last_position_error = 0.0f;
+    b_point_debounce = 0U;
+}
+
+void Motor_Output_Limit(float *left, float *right)
+{
+    *left = Limit_Float(*left, -(float)MOTOR_MAX_PWM, (float)MOTOR_MAX_PWM);
+    *right = Limit_Float(*right, -(float)MOTOR_MAX_PWM, (float)MOTOR_MAX_PWM);
+}
+
+/**
+ * @brief B ç‚¹è¯†åˆ«ã€‚
+ *        ç»Ÿä¸€ä½¿ç”¨ bsp_sensor.h é‡Œçš„ TRACK_LINE_ACTIVE_LEVELï¼Œé¿å…å¾ªè¿¹å’Œåœè½¦æžæ€§çŸ›ç›¾ã€‚
+ */
+uint8_t Is_Reach_B_Point(void)
+{
+    uint8_t all_active = Sensor_Count_Line_Active();
+    uint8_t center_active = Sensor_Count_Center_Line_Active();
+
+    if (travel_pulse_abs < B_POINT_MIN_TRAVEL_PULSE) {
+        b_point_debounce = 0U;
+        return 0U;
+    }
+
+    if (Task_Timer_Ms < B_POINT_MIN_TIME_MS) {
+        b_point_debounce = 0U;
+        return 0U;
+    }
+
+    if (all_active >= B_POINT_ACTIVE_COUNT_MIN || center_active >= B_POINT_CENTER_COUNT_MIN) {
+        if (b_point_debounce < B_POINT_DEBOUNCE_COUNT) {
+            b_point_debounce++;
+        }
+    } else {
+        b_point_debounce = 0U;
+    }
+
+    return (b_point_debounce >= B_POINT_DEBOUNCE_COUNT) ? 1U : 0U;
+}
+
+/* =========================================================
+ * ä¸‰å¤§æŽ§åˆ¶çŽ¯è®¡ç®—å‡½æ•°
+ * ========================================================= */
+float Calculate_Track_PWM(void)
+{
+    float current_error = Sensor_Get_Track_Error();
     float delta_error = current_error - last_track_error;
     float turn_adjust = (current_error * Track_Kp) + (delta_error * Track_Kd);
-    
+
     last_track_error = current_error;
     return turn_adjust;
 }
 
-// 2. Ö±Á¢ PD ¼ÆËãº¯Êý
-float Calculate_Balance_PWM(float current_angle, float target_angle) {
-    static float last_angle = 145.0f;
-    
-    float error = current_angle - target_angle;      
-    float slope = current_angle - last_angle;        
-    last_angle = current_angle;
-    
-    float balance_out = (error * Balance_Kp) + (slope * Balance_Kd);
-    return balance_out;
+float Calculate_Balance_PWM(float current_angle, float target_angle)
+{
+    float error = current_angle - target_angle;
+    float slope = current_angle - balance_last_angle;
+
+    balance_last_angle = current_angle;
+
+    return (error * Balance_Kp) + (slope * Balance_Kd);
 }
 
-// 3. ËÙ¶È PI ¼ÆËãº¯Êý (Éý¼¶°æ£ºµ¹Á¢°Ú´®¼¶Ä£Ê½)
-float Calculate_Velocity_PWM(float target_speed, float actual_l, float actual_r) {
-    static float velocity_integral = 0;
-    
+float Calculate_Velocity_PWM(float target_speed, float actual_l, float actual_r)
+{
     float current_speed = (actual_l + actual_r) / 2.0f;
     float error = target_speed - current_speed;
-    
-    // ??¡¾ºËÐÄÐÞ¸´¡¿½«ÕâÀïµÄ»ý·ÖÅÐ¶¨Çø¼äÍ¬²½ÐÞ¸ÄÎª 105 ~ 185 ¶È
-    if (Pendulum_Angle > 105.0f && Pendulum_Angle < 185.0f) {
+
+    if (Is_Angle_Safe()) {
         velocity_integral += error;
-        if(velocity_integral > 50.0f)  velocity_integral = 50.0f;  
-        if(velocity_integral < -50.0f) velocity_integral = -50.0f;
+        velocity_integral = Limit_Float(velocity_integral, -50.0f, 50.0f);
     } else {
-        velocity_integral = 0; 
+        velocity_integral = 0.0f;
     }
-    
-    float angle_adjustment = (error * Velocity_Kp) + (velocity_integral * Velocity_Ki);
-    return angle_adjustment;
-}
-/* ========================================================= */
 
-void Reset_Control_Variables(void) {
-    Task_Timer_Ms = 0;
-    Balance_PWM = 0;
-    Velocity_PWM = 0;
-    Track_PWM = 0;
-    last_track_error = 0;
+    return (error * Velocity_Kp) + (velocity_integral * Velocity_Ki);
 }
 
-void Control_Task_Init(void) {
-    Sensor_Init(); 
+static float Calculate_Position_Angle_Compensation(float delta_pulse_avg)
+{
+    float position_error;
+    float position_delta;
+    float angle_comp;
+
+    position_sum_pulse += delta_pulse_avg;
+    position_sum_pulse = Limit_Float(position_sum_pulse, -6000.0f, 6000.0f);
+
+    position_error = 0.0f - position_sum_pulse;
+    position_delta = position_error - last_position_error;
+    last_position_error = position_error;
+
+    angle_comp = (position_error * Position_Kp) + (position_delta * Position_Kd);
+
+    /* åŽŸåœ°ä½ç½®çŽ¯åªåšå°è§’åº¦æ…¢ä¿®æ­£ï¼Œé˜²æ­¢æŠŠç›´ç«‹çŽ¯é¡¶é£žã€‚ */
+    return Limit_Float(angle_comp, -8.0f, 8.0f);
+}
+
+void Reset_Control_Variables(void)
+{
+    Task_Timer_Ms = 0U;
+
+    Balance_PWM = 0.0f;
+    Velocity_PWM = 0.0f;
+    Track_PWM = 0.0f;
+    Left_Motor_Out = 0.0f;
+    Right_Motor_Out = 0.0f;
+
+    Target_Speed_L = 0.0f;
+    Target_Speed_R = 0.0f;
+
+    velocity_integral = 0.0f;
+    balance_last_angle = Pendulum_Angle;
+    last_track_error = 0.0f;
+    position_sum_pulse = 0.0f;
+    last_position_error = 0.0f;
+    travel_pulse_abs = 0.0f;
+    b_point_debounce = 0U;
+}
+
+void Control_Task_Init(void)
+{
+    Sensor_Init();
     Reset_Control_Variables();
 }
 
-/* ------------------------------ */
-
 void Control_Task_Loop_5ms(void)
 {
-    /* ========================================================= */
-    /* Debug Ó²¼þ²âÊÔÀ¹½ØÆ÷                                      */
-    /* ========================================================= */
-    if (Debug_Mode_Enable == 1)
-    {
+    int16_t case_enc_L;
+    int16_t case_enc_R;
+    float delta_pulse_avg;
+
+    /* Debug ç¡¬ä»¶æµ‹è¯•æ‹¦æˆªå™¨ */
+    if (Debug_Mode_Enable == 1U) {
         test_screen_task = (uint8_t)Current_Task;
         test_angle = Pendulum_Angle;
-        
+
         test_enc_L = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
         test_enc_R = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
-        
         __HAL_TIM_SET_COUNTER(&htim3, 0);
         __HAL_TIM_SET_COUNTER(&htim4, 0);
-        
-        Actual_Speed_L = (float)test_enc_L * 12000.0f / 1560.0f;
-        Actual_Speed_R = (float)test_enc_R * 12000.0f / 1560.0f;
-        
+
+        Actual_Speed_L = ((float)test_enc_L * 60000.0f) / (CTRL_PERIOD_MS_F * ENCODER_PPR);
+        Actual_Speed_R = ((float)test_enc_R * 60000.0f) / (CTRL_PERIOD_MS_F * ENCODER_PPR);
+
         Target_Speed_L = 150.0f;
         Target_Speed_R = 150.0f;
-        
-        test_track_err = Sensor_Get_Track_Error(); 
+
+        test_track_err = Sensor_Get_Track_Error();
         test_is_B_point = Is_Reach_B_Point();
 
         Motor_Set_Speed((int16_t)test_pwm_L, (int16_t)test_pwm_R);
-        return; 
+        return;
     }
-    /* ========================================================= */
 
-    // 1. »ñÈ¡µ±Ç° 5ms ÄÚµÄÔ­Ê¼Âö³åÊý²¢Á¢¿ÌÇåÁã
-    int16_t case_enc_L = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
-    int16_t case_enc_R = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
+    /* èŽ·å–å½“å‰æŽ§åˆ¶å‘¨æœŸå†…ç¼–ç å™¨è„‰å†²å¹¶æ¸…é›¶ */
+    case_enc_L = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
+    case_enc_R = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
     __HAL_TIM_SET_COUNTER(&htim3, 0);
     __HAL_TIM_SET_COUNTER(&htim4, 0);
-    
-    // 2. ¼ÆËãÊµ¼Ê×ªËÙ
-    Actual_Speed_L = (float)case_enc_L * 12000.0f / 1560.0f;
-    Actual_Speed_R = (float)case_enc_R * 12000.0f / 1560.0f;
-    
-    switch(Current_Task)
-    {
-        case TASK_IDLE:
-            Motor_Set_Speed(0, 0); 
-            Reset_Control_Variables();
-            return;
 
-        case TASK_1_PURE_TRACK:
-            if (Is_Reach_B_Point()) {
-                Current_Task = TASK_IDLE; 
-            }
-            Velocity_PWM = Track_Base_Speed; 
-            Track_PWM = Calculate_Track_PWM(); 
-            
-            Left_Motor_Out  = Velocity_PWM + Track_PWM;
-            Right_Motor_Out = Velocity_PWM - Track_PWM;
-            break;
-
-        case TASK_2_STAY_BALANCE:
-            if (Pendulum_Angle > 105.0f && Pendulum_Angle < 185.0f) 
-            {
-                float Angle_Delta = Calculate_Velocity_PWM(0.0f, Actual_Speed_L, Actual_Speed_R);
-                float Dynamic_Target_Angle = Mechanical_Middle + Angle_Delta;
-                
-                Balance_PWM  = Calculate_Balance_PWM(Pendulum_Angle, Dynamic_Target_Angle);
-                Track_PWM    = 0;
-                
-                Left_Motor_Out  = Balance_PWM;
-                Right_Motor_Out = Balance_PWM;
-            } 
-            else 
-            {
-                Left_Motor_Out  = 0; 
-                Right_Motor_Out = 0;
-            }
-            break;
-
-        case TASK_3_TRACK_BALANCE:
-            Task_Timer_Ms += 5;
-            if (Pendulum_Angle > 105.0f && Pendulum_Angle < 185.0f) 
-            {
-                float Angle_Delta = Calculate_Velocity_PWM(Track_Base_Speed, Actual_Speed_L, Actual_Speed_R);
-                float Dynamic_Target_Angle = Mechanical_Middle + Angle_Delta;
-                
-                Balance_PWM  = Calculate_Balance_PWM(Pendulum_Angle, Dynamic_Target_Angle);
-                Track_PWM    = Calculate_Track_PWM(); 
-                
-                Left_Motor_Out  = Balance_PWM + Track_PWM;
-                Right_Motor_Out = Balance_PWM - Track_PWM;
-                
-                if (Task_Timer_Ms > 1000 && Is_Reach_B_Point()) {
-                    Current_Task = TASK_IDLE; 
-                }
-            } 
-            else 
-            {
-                Left_Motor_Out = 0; 
-                Right_Motor_Out = 0;
-            }
-            break;
-
-        case TASK_4_SPIN_BALANCE:
-            if (Pendulum_Angle > 105.0f && Pendulum_Angle < 185.0f) {
-                float Angle_Delta = Calculate_Velocity_PWM(0.0f, Actual_Speed_L, Actual_Speed_R);
-                float Dynamic_Target_Angle = Mechanical_Middle + Angle_Delta;
-                
-                Balance_PWM  = Calculate_Balance_PWM(Pendulum_Angle, Dynamic_Target_Angle);
-                float Spin_Value = 200.0f; 
-                
-                Left_Motor_Out  = Balance_PWM + Spin_Value;
-                Right_Motor_Out = Balance_PWM - Spin_Value;
-            } else {
-                Left_Motor_Out = 0; 
-                Right_Motor_Out = 0;
-            }
-            break;
+    delta_pulse_avg = ((float)case_enc_L + (float)case_enc_R) / 2.0f;
+    if (delta_pulse_avg >= 0.0f) {
+        travel_pulse_abs += delta_pulse_avg;
+    } else {
+        travel_pulse_abs -= delta_pulse_avg;
     }
 
-    // Ó²¼þÏÞ·ù²¢Êä³ö 
+    Actual_Speed_L = ((float)case_enc_L * 60000.0f) / (CTRL_PERIOD_MS_F * ENCODER_PPR);
+    Actual_Speed_R = ((float)case_enc_R * 60000.0f) / (CTRL_PERIOD_MS_F * ENCODER_PPR);
+
+    if (Current_Task == TASK_IDLE) {
+        Motor_Set_Speed(0, 0);
+        Reset_Control_Variables();
+        return;
+    }
+
+    Task_Timer_Ms += CTRL_PERIOD_MS;
+
+    switch (Current_Task) {
+    case TASK_1_PURE_TRACK:
+        Target_Speed_L = Track_Base_Speed;
+        Target_Speed_R = Track_Base_Speed;
+
+        if (Is_Reach_B_Point()) {
+            Current_Task = TASK_IDLE;
+            Motor_Set_Speed(0, 0);
+            Reset_Control_Variables();
+            return;
+        }
+
+        Velocity_PWM = Track_Base_Speed;
+        Track_PWM = Calculate_Track_PWM();
+        Left_Motor_Out = Velocity_PWM + Track_PWM;
+        Right_Motor_Out = Velocity_PWM - Track_PWM;
+        break;
+
+    case TASK_2_STAY_BALANCE:
+        Target_Speed_L = 0.0f;
+        Target_Speed_R = 0.0f;
+
+        if (Is_Angle_Safe()) {
+            float angle_delta = Calculate_Velocity_PWM(0.0f, Actual_Speed_L, Actual_Speed_R);
+            float position_angle_comp = Calculate_Position_Angle_Compensation(delta_pulse_avg);
+            float dynamic_target_angle = Mechanical_Middle + angle_delta + position_angle_comp;
+
+            Balance_PWM = Calculate_Balance_PWM(Pendulum_Angle, dynamic_target_angle);
+            Track_PWM = 0.0f;
+            Left_Motor_Out = Balance_PWM;
+            Right_Motor_Out = Balance_PWM;
+        } else {
+            Clear_Dynamic_Loops();
+            Left_Motor_Out = 0.0f;
+            Right_Motor_Out = 0.0f;
+        }
+        break;
+
+    case TASK_3_TRACK_BALANCE:
+        Target_Speed_L = Track_Base_Speed;
+        Target_Speed_R = Track_Base_Speed;
+
+        if (Is_Angle_Safe()) {
+            float angle_delta = Calculate_Velocity_PWM(Track_Base_Speed, Actual_Speed_L, Actual_Speed_R);
+            float dynamic_target_angle = Mechanical_Middle + angle_delta;
+
+            Balance_PWM = Calculate_Balance_PWM(Pendulum_Angle, dynamic_target_angle);
+            Track_PWM = Calculate_Track_PWM();
+            Left_Motor_Out = Balance_PWM + Track_PWM;
+            Right_Motor_Out = Balance_PWM - Track_PWM;
+
+            if (Is_Reach_B_Point()) {
+                Current_Task = TASK_IDLE;
+                Motor_Set_Speed(0, 0);
+                Reset_Control_Variables();
+                return;
+            }
+        } else {
+            Clear_Dynamic_Loops();
+            Left_Motor_Out = 0.0f;
+            Right_Motor_Out = 0.0f;
+        }
+        break;
+
+    case TASK_4_SPIN_BALANCE:
+        Target_Speed_L = 0.0f;
+        Target_Speed_R = 0.0f;
+
+        if (Is_Angle_Safe()) {
+            float angle_delta = Calculate_Velocity_PWM(0.0f, Actual_Speed_L, Actual_Speed_R);
+            float dynamic_target_angle = Mechanical_Middle + angle_delta;
+            float spin_value = 200.0f;
+
+            Balance_PWM = Calculate_Balance_PWM(Pendulum_Angle, dynamic_target_angle);
+            Left_Motor_Out = Balance_PWM + spin_value;
+            Right_Motor_Out = Balance_PWM - spin_value;
+        } else {
+            Clear_Dynamic_Loops();
+            Left_Motor_Out = 0.0f;
+            Right_Motor_Out = 0.0f;
+        }
+        break;
+
+    default:
+        Current_Task = TASK_IDLE;
+        Motor_Set_Speed(0, 0);
+        Reset_Control_Variables();
+        return;
+    }
+
     Motor_Output_Limit(&Left_Motor_Out, &Right_Motor_Out);
-    Motor_Set_Speed((int16_t)Left_Motor_Out, (int16_t)Right_Motor_Out); 
+    Motor_Set_Speed((int16_t)Left_Motor_Out, (int16_t)Right_Motor_Out);
 }

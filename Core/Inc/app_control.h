@@ -3,22 +3,28 @@
 
 #include "main.h"
 
-/* ÈÎÎñ×´Ì¬»úÃ¶¾Ù */
+/* ä»»åŠ¡çŠ¶æ€æœºæšä¸¾ */
 typedef enum {
-    TASK_IDLE = 0,         // ¿ÕÏĞ/Í£Ö¹×´Ì¬
-    TASK_1_PURE_TRACK,    // ÈÎÎñ1£º´¿Ñ°¼£µ½BµãÍ££¨²»´ø°Ú£©
-    TASK_2_STAY_BALANCE,  // ÈÎÎñ2£ºÔ­µØÆğ°Ú²¢Ö±Á¢10s
-    TASK_3_TRACK_BALANCE, // ÈÎÎñ3£ºÆğ°ÚÖ±Á¢+Ñ°¼£µ½BµãÍ£
-    TASK_4_SPIN_BALANCE   // ÈÎÎñ4£ºÔ­µØĞı×ª+Î¬³ÖÖ±Á¢
+    TASK_IDLE = 0,          /* ç©ºé—²/åœæ­¢çŠ¶æ€ */
+    TASK_1_PURE_TRACK,     /* ä»»åŠ¡1ï¼šçº¯å¯»è¿¹åˆ° B ç‚¹åœ */
+    TASK_2_STAY_BALANCE,   /* ä»»åŠ¡2ï¼šåŸåœ°èµ·æ‘†å¹¶ç›´ç«‹ 10s */
+    TASK_3_TRACK_BALANCE,  /* ä»»åŠ¡3ï¼šèµ·æ‘†ç›´ç«‹ + å¯»è¿¹åˆ° B ç‚¹åœ */
+    TASK_4_SPIN_BALANCE    /* ä»»åŠ¡4ï¼šåŸåœ°æ—‹è½¬ + ç»´æŒç›´ç«‹ */
 } Target_Task_e;
 
-/* Íâ²¿ÉùÃ÷È«¾Ö×´Ì¬±äÁ¿ */
 extern volatile Target_Task_e Current_Task;
-extern volatile uint32_t Task_Timer_Ms; // ÓÃÓÚÈÎÎñÊ±¼ä¼ÆÊ±£¨Èç10ÃëÎ¬³Ö£©
+extern volatile uint32_t Task_Timer_Ms;
 
-/* º¯ÊıÉùÃ÷ */
+/* VOFA/HMI è°ƒè¯•å˜é‡ */
+extern float Actual_Speed_L;
+extern float Actual_Speed_R;
+extern float Target_Speed_L;
+extern float Target_Speed_R;
+extern float Left_Motor_Out;
+extern float Right_Motor_Out;
+
 void Control_Task_Init(void);
 void Control_Task_Loop_5ms(void);
 void Reset_Control_Variables(void);
 
-#endif
+#endif /* __APP_CONTROL_H */

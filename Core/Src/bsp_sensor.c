@@ -1,50 +1,89 @@
 #include "bsp_sensor.h"
 
-// ¾²Ì¬Êý×é´æ·ÅÒý½Å£¬±ãÓÚÑ­»·¶ÁÈ¡
-static GPIO_TypeDef* Track_Ports[TRACK_COUNT] = {TRACK1_PORT, TRACK2_PORT, TRACK3_PORT, TRACK4_PORT, TRACK5_PORT, TRACK6_PORT, TRACK7_PORT, TRACK8_PORT};
-static uint16_t Track_Pins[TRACK_COUNT] = {TRACK1_PIN, TRACK2_PIN, TRACK3_PIN, TRACK4_PIN, TRACK5_PIN, TRACK6_PIN, TRACK7_PIN, TRACK8_PIN};
+/* é™æ€æ•°ç»„å­˜æ”¾å¼•è„šï¼Œä¾¿äºŽå¾ªçŽ¯è¯»å– */
+static GPIO_TypeDef *Track_Ports[TRACK_COUNT] = {
+    TRACK1_PORT, TRACK2_PORT, TRACK3_PORT, TRACK4_PORT,
+    TRACK5_PORT, TRACK6_PORT, TRACK7_PORT, TRACK8_PORT
+};
 
-// 8Â·»Ò¶ÈµÄÈ¨ÖØ£º4ºÍ5Î»ÓÚÖÐÐÄ£¬ÏòÁ½²àµÝÔö
-// Ñ¹ºÚÏßÊä³ö¸ßµçÆ½(1)»¹ÊÇµÍµçÆ½(0)¸ù¾ÝÄã´«¸ÐÆ÷µÄÓ²¼þÂß¼­¾ö¶¨£¬ÕâÀï¼ÙÉè¼ì²âµ½ºÚÏß¶ÁÈ¡µ½ 1
-static const float Track_Weights[TRACK_COUNT] = {-7.0f, -5.0f, -3.0f, -1.0f, 1.0f, 3.0f, 5.0f, 7.0f};
+static uint16_t Track_Pins[TRACK_COUNT] = {
+    TRACK1_PIN, TRACK2_PIN, TRACK3_PIN, TRACK4_PIN,
+    TRACK5_PIN, TRACK6_PIN, TRACK7_PIN, TRACK8_PIN
+};
+
+/* 8è·¯ç°åº¦æƒé‡ï¼š4ã€5å·é è¿‘ä¸­å¿ƒï¼Œå‘ä¸¤è¾¹é€’å¢ž */
+static const float Track_Weights[TRACK_COUNT] = {
+    -7.0f, -5.0f, -3.0f, -1.0f, 1.0f, 3.0f, 5.0f, 7.0f
+};
 
 void Sensor_Init(void)
 {
-    // GPIO³õÊ¼»¯ÒÑÓÉCubeMXÍê³É
+    /* GPIO åˆå§‹åŒ–å·²ç”± CubeMX å®Œæˆ */
+}
+
+uint8_t Sensor_Is_On_Line(uint8_t index)
+{
+    if (index >= TRACK_COUNT) {
+        return 0;
+    }
+
+    return (HAL_GPIO_ReadPin(Track_Ports[index], Track_Pins[index]) == TRACK_LINE_ACTIVE_LEVEL) ? 1U : 0U;
+}
+
+uint8_t Sensor_Count_Line_Active(void)
+{
+    uint8_t active_count = 0;
+
+    for (uint8_t i = 0; i < TRACK_COUNT; i++) {
+        if (Sensor_Is_On_Line(i)) {
+            active_count++;
+        }
+    }
+
+    return active_count;
+}
+
+uint8_t Sensor_Count_Center_Line_Active(void)
+{
+    uint8_t active_count = 0;
+
+    /* ä¸­é—´å››è·¯ï¼šTRACK3 ~ TRACK6ï¼Œå¯¹åº”æ•°ç»„ä¸‹æ ‡ 2 ~ 5 */
+    for (uint8_t i = 2; i <= 5; i++) {
+        if (Sensor_Is_On_Line(i)) {
+            active_count++;
+        }
+    }
+
+    return active_count;
 }
 
 /**
-  * @brief  ¼ÓÈ¨Ëã·¨¼ÆËãÑ°¼£ºÚÏßÆ«²îÖµ (ÖÕ¼«ÈÚºÏ°æ)
-  * @retval Æ«²î·¶Î§Ô¼ -7.0 µ½ +7.0f¡£ÈôÍêÈ«ÍÑ¹ì£¬Ç¿ÖÆÊä³ö¼«ÏÞÖµ´òËÀ·½ÏòÅÌÀ­»Ø£¡
-  */
+ * @brief  åŠ æƒç®—æ³•è®¡ç®—å¯»è¿¹é»‘çº¿åå·®å€¼ã€‚
+ * @retval åå·®èŒƒå›´çº¦ -7.0 åˆ° +7.0ï¼›è„±è½¨æ—¶æ ¹æ®ä¸Šæ¬¡åå·®ç»™å‡ºæ‹‰å›žæ–¹å‘ã€‚
+ */
 float Sensor_Get_Track_Error(void)
 {
     float sum_weight = 0.0f;
     uint8_t active_count = 0;
     static float last_error = 0.0f;
-    
-    // 1. Êý×é + forÑ­»·£¬ÓÅÑÅ¶ÁÈ¡8Â·´«¸ÐÆ÷
-    for (uint8_t i = 0; i < TRACK_COUNT; i++)
-    {
-        // ¼ÙÉè¼ì²âµ½ºÚÏß·µ»Ø GPIO_PIN_SET (1)£¬Çë¸ù¾ÝÄãµÄÓ²¼þ¼«ÐÔÐÞ¸Ä
-        if (HAL_GPIO_ReadPin(Track_Ports[i], Track_Pins[i]) == GPIO_PIN_SET)
-        {
+
+    for (uint8_t i = 0; i < TRACK_COUNT; i++) {
+        if (Sensor_Is_On_Line(i)) {
             sum_weight += Track_Weights[i];
             active_count++;
         }
     }
-    
-    // 2. Ç¿Á¦ÍÑ¹ì±£»¤»úÖÆ (ÎüÊÕÁË Version 1 µÄÓÅµã)
-    if (active_count == 0)
-    {
-        // ³å³öÈüµÀÊ±£¬¸ù¾Ý×îºóÒ»´ÎµÄÆ«Àë·½Ïò£¬Ç¿ÖÆÊä³öÒ»¸ö¼«´óµÄÐÞÕýÖµ (+8.0 »ò -8.0)
-        if (last_error > 0) return 8.0f;  // ´ÓÓÒ±ß³å³öÈ¥ÁË£¬ºÝºÝÍù×ó´ò·½Ïò
-        if (last_error < 0) return -8.0f; // ´Ó×ó±ß³å³öÈ¥ÁË£¬ºÝºÝÍùÓÒ´ò·½Ïò
-        return 0.0f; // ¼«Ð¡¸ÅÂÊ·¢Éú
+
+    if (active_count == 0U) {
+        if (last_error > 0.0f) {
+            return 8.0f;
+        }
+        if (last_error < 0.0f) {
+            return -8.0f;
+        }
+        return 0.0f;
     }
-    
-    // 3. Õý³£Çé¿öÏÂµÄ¼ÓÈ¨Æ½¾ù¼ÆËã
+
     last_error = sum_weight / (float)active_count;
-    
     return last_error;
 }
