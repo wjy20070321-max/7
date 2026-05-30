@@ -3,8 +3,8 @@
 
 #include "main.h"
 
-/* 8路灰度传感器引脚定义 */
-#define TRACK_COUNT 8
+/* 8路灰度/红外寻迹传感器引脚定义 */
+#define TRACK_COUNT 8U
 
 #define TRACK1_PORT GPIOF
 #define TRACK1_PIN  GPIO_PIN_12
@@ -31,15 +31,30 @@
 #define TRACK8_PIN  GPIO_PIN_14
 
 /*
- * 黑线有效电平统一入口。
- * 如果实测黑线输出低电平，把这里改成 GPIO_PIN_RESET 即可，
- * 循迹误差和 B 点判断会一起跟着改，不会再前后矛盾。
+ * 黑线有效电平。
+ * 你现在任务一寻不了迹，大概率是模块压黑线输出低电平，
+ * 所以这版默认用 GPIO_PIN_RESET。
+ * 如果你用串口/屏幕看到压黑线时读数反了，再改成 GPIO_PIN_SET。
  */
-#define TRACK_LINE_ACTIVE_LEVEL GPIO_PIN_SET
+#define TRACK_BLACK_LEVEL GPIO_PIN_RESET
+
+/*
+ * B点是直径4cm黑圆，正常会比1.8cm引导线压到更多传感器。
+ * 如果你的传感器间距较大，B点不停，可以把 B_POINT_BLACK_MIN_COUNT 从5改4。
+ */
+#define B_POINT_BLACK_MIN_COUNT         5U
+#define B_POINT_CENTER_BLACK_MIN_COUNT  3U
 
 void Sensor_Init(void);
+void Sensor_Reset_Track_State(void);
+
 float Sensor_Get_Track_Error(void);
 uint8_t Sensor_Is_On_Line(uint8_t index);
+uint8_t Sensor_Count_Black(void);
+uint8_t Sensor_Count_Center_Black(void);
+uint8_t Sensor_Get_Raw_Bits(void);
+
+/* 兼容上一版函数名 */
 uint8_t Sensor_Count_Line_Active(void);
 uint8_t Sensor_Count_Center_Line_Active(void);
 
